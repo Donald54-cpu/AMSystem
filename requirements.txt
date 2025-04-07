@@ -1,0 +1,23 @@
+# Backend (API)
+fastapi==0.109.1
+uvicorn[standard]==0.27.0
+asyncpg==0.29.0
+python-dotenv==1.0.1
+python-multipart==0.0.6
+
+# Frontend (Kivy)
+kivy==2.3.0
+kivymd==1.2.0
+
+# Data processing
+pandas==2.1.1
+numpy==1.26.0  # Requis par pandas
+
+# Graphiques
+matplotlib==3.8.0
+
+# Requêtes HTTP
+requests==2.31.0
+
+# Développement (optionnel)
+pytest==7.4.3
