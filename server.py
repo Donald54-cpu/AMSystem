@@ -1,49 +1,39 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
-import asyncpg  # Remplace sqlite3
-import uvicorn
-import asyncio
-import random
-import time
+import asyncpg
 import os
-from dotenv import load_dotenv
-
-load_dotenv()  # Pour les variables d'environnement
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# Configuration PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/thermocouple")
+# Autoriser les requêtes CORS pour le développement
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Configuration PostgreSQL (utilisez les infos de Supabase)
+DATABASE_URL = os.getenv("https://mraibixatihdjybdmdkq.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYWliaXhhdGloZGp5YmRtZGtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQwNDA0OTIsImV4cCI6MjA1OTYxNjQ5Mn0.RIZVG0jlljeYPl5U_o3DmsM0qSfFMiMcC1eewGU0My4")
+
+class MotorData(BaseModel):
+    motor_id: int
+    temperature: float
+    voltage: float
+    timestamp: datetime = None
+
+class ThresholdData(BaseModel):
+    motor_id: int
+    temp_max: float
+    voltage_min: float
+    voltage_max: float
 
 async def get_db():
     return await asyncpg.connect(DATABASE_URL)
 
-async def init_db():
-    conn = await get_db()
-    try:
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS thermocouple_data (
-            id SERIAL PRIMARY KEY,
-            motor_id INTEGER,
-            temperature REAL,
-            voltage REAL,
-            timestamp TIMESTAMP
-        )
-        """)
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS thresholds (
-            motor_id INTEGER PRIMARY KEY,
-            temp_max REAL,
-            voltage_min REAL,
-            voltage_max REAL
-        )
-        """)
-    finally:
-        await conn.close()
-
-# Modifiez toutes les fonctions pour utiliser async/await avec asyncpg
-# Exemple pour receive_motor_data:
 @app.post("/api/data/")
 async def receive_motor_data(data: MotorData):
     conn = await get_db()
@@ -68,4 +58,46 @@ async def receive_motor_data(data: MotorData):
     finally:
         await conn.close()
 
-# ... (adaptez toutes les autres fonctions de la même manière)
+@app.get("/api/data/{motor_id}/history")
+async def get_motor_history(motor_id: int, limit: int = 100):
+    conn = await get_db()
+    try:
+        records = await conn.fetch(
+            "SELECT * FROM thermocouple_data WHERE motor_id = $1 ORDER BY timestamp DESC LIMIT $2",
+            motor_id, limit
+        )
+        return [dict(record) for record in records]
+    finally:
+        await conn.close()
+
+@app.get("/api/thresholds/{motor_id}")
+async def get_thresholds(motor_id: int):
+    conn = await get_db()
+    try:
+        thresholds = await conn.fetchrow(
+            "SELECT * FROM thresholds WHERE motor_id = $1", motor_id)
+        if not thresholds:
+            raise HTTPException(status_code=404, detail="Thresholds not found")
+        return dict(thresholds)
+    finally:
+        await conn.close()
+
+@app.post("/api/thresholds/")
+async def update_thresholds(data: ThresholdData):
+    conn = await get_db()
+    try:
+        await conn.execute("""
+        INSERT INTO thresholds (motor_id, temp_max, voltage_min, voltage_max)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (motor_id) DO UPDATE SET
+            temp_max = EXCLUDED.temp_max,
+            voltage_min = EXCLUDED.voltage_min,
+            voltage_max = EXCLUDED.voltage_max
+        """, data.motor_id, data.temp_max, data.voltage_min, data.voltage_max)
+        return {"status": "success"}
+    finally:
+        await conn.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
